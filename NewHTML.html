@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chat Global LocalStorage</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-900 text-slate-100 h-screen flex flex-col font-sans">
+
+    <!-- TELA DE LOGIN / PERFIL -->
+    <div id="login-screen" class="fixed inset-0 bg-slate-950 z-50 flex items-center justify-center p-4">
+        <div class="bg-slate-900 border border-slate-800 p-6 rounded-2xl w-full max-w-md shadow-2xl space-y-5">
+            <div class="text-center">
+                <h1 class="text-2xl font-bold bg-gradient-to-r from-indigo-400 to-cyan-400 bg-clip-text text-transparent">Chat Global</h1>
+                <p class="text-xs text-slate-400 mt-1">Configure seu perfil para entrar na conversa</p>
+            </div>
+
+            <!-- Foto de Perfil -->
+            <div class="flex flex-col items-center space-y-2">
+                <div class="relative w-20 h-20 rounded-full overflow-hidden border-2 border-indigo-500 bg-slate-800 flex items-center justify-center">
+                    <img id="preview-avatar" src="" class="w-full h-full object-cover hidden">
+                    <span id="preview-placeholder" class="text-2xl text-slate-500">📷</span>
+                </div>
+                <label class="cursor-pointer text-xs bg-slate-800 hover:bg-slate-700 text-indigo-300 px-3 py-1.5 rounded-lg border border-slate-700 transition">
+                    Escolher da Galeria
+                    <input type="file" id="input-avatar" accept="image/*" class="hidden" onchange="loadAvatar(event)">
+                </label>
+            </div>
+
+            <!-- Nome -->
+            <div class="space-y-1">
+                <label class="text-xs text-slate-400 font-medium">Seu Nome</label>
+                <input type="text" id="input-name" placeholder="Ex: Órion" maxlength="20" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-indigo-500 transition">
+            </div>
+
+            <!-- Bio -->
+            <div class="space-y-1">
+                <label class="text-xs text-slate-400 font-medium">Sua Bio</label>
+                <input type="text" id="input-bio" placeholder="Ex: Desenvolvedor web e criador de jogos" maxlength="50" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-indigo-500 transition">
+            </div>
+
+            <button onclick="enterChat()" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-medium py-2.5 rounded-xl transition shadow-lg shadow-indigo-600/20">
+                Entrar no Chat
+            </button>
+        </div>
+    </div>
+
+    <!-- TELA PRINCIPAL DO CHAT -->
+    <div id="chat-screen" class="hidden flex-1 flex flex-col h-full max-w-4xl mx-auto w-full border-x border-slate-800 bg-slate-900">
+        
+        <!-- Header -->
+        <header class="bg-slate-900/80 backdrop-blur border-b border-slate-800 p-4 flex items-center justify-between sticky top-0 z-10">
+            <div class="flex items-center space-x-3">
+                <div class="w-10 h-10 rounded-full overflow-hidden border border-indigo-500 bg-slate-800">
+                    <img id="header-avatar" class="w-full h-full object-cover">
+                </div>
+                <div>
+                    <h2 id="header-name" class="font-bold text-sm"></h2>
+                    <p id="header-bio" class="text-xs text-slate-400 truncate max-w-[200px]"></p>
+                </div>
+            </div>
+            <button onclick="logout()" class="text-xs bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 px-3 py-1.5 rounded-lg transition">
+                Sair
+            </button>
+        </header>
+
+        <!-- Mensagens -->
+        <div id="messages-container" class="flex-1 overflow-y-auto p-4 space-y-4">
+            <!-- As mensagens aparecem aqui dinamicamente -->
+        </div>
+
+        <!-- Barra de Envio -->
+        <div class="p-3 bg-slate-900 border-t border-slate-800">
+            <div class="flex items-center space-x-2 bg-slate-950 border border-slate-800 rounded-2xl p-1.5 focus-within:border-indigo-500 transition">
+                
+                <!-- Enviar Imagem -->
+                <label class="p-2 cursor-pointer text-slate-400 hover:text-indigo-400 transition rounded-xl">
+                    🖼️
+                    <input type="file" id="input-image" accept="image/*" class="hidden" onchange="sendImage(event)">
+                </label>
+
+                <!-- Gravar Áudio -->
+                <button id="btn-audio" onclick="toggleAudioRecord()" class="p-2 text-slate-400 hover:text-indigo-400 transition rounded-xl" title="Gravar Áudio">
+                    🎤
+                </button>
+
+                <!-- Input de Texto -->
+                <input type="text" id="input-msg" placeholder="Digite sua mensagem..." class="flex-1 bg-transparent px-2 text-sm focus:outline-none" onkeypress="handleKeyPress(event)">
+
+                <!-- Enviar Texto -->
+                <button onclick="sendText()" class="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-xl text-sm font-medium transition shadow-md">
+                    Enviar
+                </button>
+            </div>
+            <div id="recording-status" class="hidden text-xs text-rose-400 mt-2 text-center animate-pulse">
+                Gravando áudio... Clique novamente no microfone para parar.
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const CHANNEL_NAME = 'global_chat_sync_v1';
+        const bc = new BroadcastChannel(CHANNEL_NAME);
+
+        let currentUser = JSON.parse(localStorage.getItem('chat_user') || 'null');
+        let tempAvatarBase64 = '';
+        let mediaRecorder;
+        let audioChunks = [];
+        let isRecording = false;
+
+        // Verificar se já tem usuário salvo
+        window.onload = () => {
+            if (currentUser) {
+                document.getElementById('login-screen').classList.add('hidden');
+                document.getElementById('chat-screen').classList.remove('hidden');
+                setupHeader();
+                loadMessages();
+            }
+        };
+
+        // Ouvir sincronizações de outras abas instantaneamente sem travar
+        bc.onmessage = (event) => {
+            if (event.data.type === 'NEW_MESSAGE') {
+                appendMessageToDOM(event.data.msg);
+            }
+        };
+
+        // Carregar prévia da foto no cadastro
+        function loadAvatar(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                tempAvatarBase64 = e.target.result;
+                const prev = document.getElementById('preview-avatar');
+                prev.src = tempAvatarBase64;
+                prev.classList.remove('hidden');
+                document.getElementById('preview-placeholder').classList.add('hidden');
+            };
+            reader.readAsDataURL(file);
+        }
+
+        function enterChat() {
+            const name = document.getElementById('input-name').value.trim();
+            const bio = document.getElementById('input-bio').value.trim();
+
+            if (!name) {
+                alert('Por favor, digite seu nome!');
+                return;
+            }
+            if (!tempAvatarBase64) {
+                alert('Por favor, escolha uma foto de perfil!');
+                return;
+            }
+
+            currentUser = {
+                id: 'user_' + Date.now(),
+                name: name,
+                bio: bio || 'Sem bio',
+                avatar: tempAvatarBase64
+            };
+
+            localStorage.setItem('chat_user', JSON.stringify(currentUser));
+            document.getElementById('login-screen').classList.add('hidden');
+            document.getElementById('chat-screen').classList.remove('hidden');
+            setupHeader();
+            loadMessages();
+        }
+
+        function logout() {
+            localStorage.removeItem('chat_user');
+            location.reload();
+        }
+
+        function setupHeader() {
+            document.getElementById('header-avatar').src = currentUser.avatar;
+            document.getElementById('header-name').textContent = currentUser.name;
+            document.getElementById('header-bio').textContent = currentUser.bio;
+        }
+
+        function getStoredMessages() {
+            return JSON.parse(localStorage.getItem('chat_messages') || '[]');
+        }
+
+        function saveMessage(msg) {
+            let messages = getStoredMessages();
+            messages.push(msg);
+            // Mantém apenas as últimas 100 mensagens para não sobrecarregar o localStorage
+            if (messages.length > 100) messages.shift();
+            localStorage.setItem('chat_messages', JSON.stringify(messages));
+        }
+
+        function loadMessages() {
+            const container = document.getElementById('messages-container');
+            container.innerHTML = '';
+            let messages = getStoredMessages();
+            messages.forEach(msg => appendMessageToDOM(msg, false));
+            container.scrollTop = container.scrollHeight;
+        }
+
+        function appendMessageToDOM(msg, scroll = true) {
+            const container = document.getElementById('messages-container');
+            const isMe = currentUser && msg.user.id === currentUser.id;
+
+            const div = document.createElement('div');
+            div.className = `flex items-end space-x-2 ${isMe ? 'justify-end' : 'justify-start'}`;
+
+            let contentHTML = '';
+            if (msg.type === 'text') {
+                contentHTML = `<p class="text-sm">${escapeHtml(msg.content)}</p>`;
+            } else if (msg.type === 'image') {
+                contentHTML = `<img src="${msg.content}" class="max-w-xs rounded-xl border border-slate-700 max-h-60 object-cover">`;
+            } else if (msg.type === 'audio') {
+                contentHTML = `<audio controls src="${msg.content}" class="h-10 w-48"></audio>`;
+            }
+
+            div.innerHTML = `
+                ${!isMe ? `<img src="${msg.user.avatar}" class="w-8 h-8 rounded-full object-cover border border-slate-700 mb-1">` : ''}
+                <div class="max-w-xs md:max-w-md bg-slate-800 border border-slate-700/60 rounded-2xl px-4 py-2.5 ${isMe ? 'bg-indigo-600/90 border-indigo-500 text-white rounded-br-none' : 'rounded-bl-none'}">
+                    ${!isMe ? `<span class="text-xs font-bold text-indigo-400 block mb-1">${escapeHtml(msg.user.name)}</span>` : ''}
+                    ${contentHTML}
+                    <span class="text-[10px] text-slate-400 block text-right mt-1">${msg.time}</span>
+                </div>
+            `;
+
+            container.appendChild(div);
+            if (scroll) {
+                container.scrollTop = container.scrollHeight;
+            }
+        }
+
+        function sendText() {
+            const input = document.getElementById('input-msg');
+            const text = input.value.trim();
+            if (!text) return;
+
+            const msg = {
+                id: Date.now(),
+                user: currentUser,
+                type: 'text',
+                content: text,
+                time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+            };
+
+            saveMessage(msg);
+            bc.postMessage({ type: 'NEW_MESSAGE', msg: msg });
+            appendMessageToDOM(msg);
+            input.value = '';
+        }
+
+        function handleKeyPress(e) {
+            if (e.key === 'Enter') sendText();
+        }
+
+        function sendImage(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const msg = {
+                    id: Date.now(),
+                    user: currentUser,
+                    type: 'image',
+                    content: e.target.result,
+                    time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                };
+                saveMessage(msg);
+                bc.postMessage({ type: 'NEW_MESSAGE', msg: msg });
+                appendMessageToDOM(msg);
+            };
+            reader.readAsDataURL(file);
+        }
+
+        async function toggleAudioRecord() {
+            const statusEl = document.getElementById('recording-status');
+            const btnEl = document.getElementById('btn-audio');
+
+            if (!isRecording) {
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    mediaRecorder = new MediaRecorder(stream);
+                    audioChunks = [];
+
+                    mediaRecorder.ondataavailable = event => {
+                        audioChunks.push(event.data);
+                    };
+
+                    mediaRecorder.onstop = () => {
+                        const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                        const reader = new FileReader();
+                        reader.onload = function(e) {
+                            const msg = {
+                                id: Date.now(),
+                                user: currentUser,
+                                type: 'audio',
+                                content: e.target.result,
+                                time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                            };
+                            saveMessage(msg);
+                            bc.postMessage({ type: 'NEW_MESSAGE', msg: msg });
+                            appendMessageToDOM(msg);
+                        };
+                        reader.readAsDataURL(audioBlob);
+                    };
+
+                    mediaRecorder.start();
+                    isRecording = true;
+                    statusEl.classList.remove('hidden');
+                    btnEl.classList.add('text-rose-500', 'bg-rose-500/10');
+                } catch (err) {
+                    alert('Permissão de microfone negada ou indisponível.');
+                }
+            } else {
+                mediaRecorder.stop();
+                isRecording = false;
+                statusEl.classList.add('hidden');
+                btnEl.classList.remove('text-rose-500', 'bg-rose-500/10');
+            }
+        }
+
+        function escapeHtml(text) {
+            return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        }
+    </script>
+</body>
+</html>
